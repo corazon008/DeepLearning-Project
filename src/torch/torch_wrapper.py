@@ -2,6 +2,8 @@ from sklearn.base import BaseEstimator, RegressorMixin
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from typing import Callable
+import numpy as np
 
 from src.torch.torch_model import RegressionModel, ClassificationModel
 
@@ -10,22 +12,20 @@ device = "cpu"
 
 class Skwrapper(BaseEstimator, RegressorMixin):
     def __init__(self,
-                 nb_features=None,
                  width=128,
                  layers=2,
-                 dropout_rates=[0.0],
+                 dropout_rates=None,
                  lr=1e-3,
                  activation: nn.Module = nn.ReLU,
-                 optimizer: optim.Optimizer = optim.Adam,
-                 loss_fn: nn.Module = nn.MSELoss,
+                 optimizer: Callable = optim.Adam,
+                 loss_fn: Callable = nn.MSELoss,
                  batch_size=32,
                  epochs=10,
                  verbose=0):
 
-        self.nb_features = nb_features
         self.width = width
         self.layers = layers
-        self.dropout_rates = dropout_rates
+        self.dropout_rates = dropout_rates if dropout_rates is not None else [0.0]
         self.lr = lr
         self.activation = activation
         self.optimizer = optimizer
@@ -34,6 +34,7 @@ class Skwrapper(BaseEstimator, RegressorMixin):
         self.epochs = epochs
         self.verbose = verbose
 
+        self.is_classifier = False  # to be set in subclass if needed
         self.model = None
         self.loss_history = []
 
@@ -42,10 +43,16 @@ class Skwrapper(BaseEstimator, RegressorMixin):
 
     def fit(self, X, y):
         X = torch.tensor(X, dtype=torch.float32)
-        y = torch.tensor(y, dtype=torch.float32)
+        # convert target dtype depending on task
+        if self.is_classifier:
+            # CrossEntropyLoss expects targets as long (class indices) with shape (N,)
+            y = torch.tensor(y, dtype=torch.long).squeeze()
+            self.output_vars = len(torch.unique(y))
+        else:
+            y = torch.tensor(y, dtype=torch.float32)
+            self.output_vars = y.shape[1] if len(y.shape) > 1 else 1
 
-        if self.nb_features is None:
-            self.nb_features = X.shape[1]
+        self.nb_features = X.shape[1]
 
         dataset = torch.utils.data.TensorDataset(X, y)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
@@ -78,28 +85,42 @@ class Skwrapper(BaseEstimator, RegressorMixin):
         return self
 
     def predict(self, X):
+        if self.model is None:
+            raise ValueError("Model not fitted yet")
+
+        self.model.eval()
+        with torch.no_grad():
+            if self.is_classifier:
+                probs = self.predict_proba(X)
+                preds = probs.argmax(axis=1)
+                return preds
+            else:
+                X = torch.tensor(X, dtype=torch.float32).to(device)
+                preds = self.model(X)
+        return preds.cpu().numpy().ravel().reshape(-1, self.output_vars)
+
+    def predict_proba(self, X):
         self.model.eval()
         with torch.no_grad():
             X = torch.tensor(X, dtype=torch.float32).to(device)
-            preds = self.model(X)
-        return preds.cpu().numpy().ravel().reshape(-1, 2)
+            logits = self.model(X)
+            probs = torch.softmax(logits, dim=1)
+        return probs.cpu().numpy()
 
 
 class TorchRegressor(Skwrapper):
     def __init__(self,
-                 nb_features=None,
                  width=128,
                  layers=2,
-                 dropout_rates=[0.0],
+                 dropout_rates=None,
                  lr=1e-3,
                  activation: nn.Module = nn.ReLU,
-                 optimizer: optim.Optimizer = optim.Adam,
-                 loss_fn: nn.Module = nn.MSELoss,
+                 optimizer: Callable = optim.Adam,
+                 loss_fn: Callable = nn.MSELoss,
                  batch_size=32,
                  epochs=10, ):
 
         super().__init__(
-            nb_features=nb_features,
             width=width,
             layers=layers,
             dropout_rates=dropout_rates,
@@ -114,10 +135,11 @@ class TorchRegressor(Skwrapper):
     def _build_model(self):
         return RegressionModel(
             nb_features=self.nb_features,
+            output_vars=self.output_vars,
             width=self.width,
             layers=self.layers,
             activation=self.activation,
-            loss_fn=self.loss_fn,
+            loss_fn=self.loss_fn(),
             dropout_rates=self.dropout_rates
         ).to(device)
 
@@ -125,35 +147,45 @@ class TorchRegressor(Skwrapper):
 
 class TorchClassifier(Skwrapper):
     def __init__(self,
-                 nb_features=None,
-                 num_classes=2,
                  width=128,
                  layers=2,
-                 dropout_rates=[0.0],
+                 dropout_rates=None,
                  lr=1e-3,
-                 optimizer: optim.Optimizer = optim.Adam,
-                 loss_fn: nn.Module = nn.CrossEntropyLoss,
+                 activation: nn.Module = nn.ReLU,
+                 optimizer: Callable = optim.Adam,
+                 loss_fn: Callable = nn.CrossEntropyLoss,
                  batch_size=32,
-                 epochs=10, ):
+                 epochs=10,
+                 class_weights=None):
+
+        self.class_weights = class_weights
 
         super().__init__(
-            nb_features=nb_features,
             width=width,
             layers=layers,
             dropout_rates=dropout_rates,
             lr=lr,
             optimizer=optimizer,
+            activation=activation,
             loss_fn=loss_fn,
             batch_size=batch_size,
-            epochs=epochs
+            epochs=epochs,
         )
-        self.num_classes = num_classes
+        # mark this wrapper as a classifier so it handles target dtype and predict
+        self.is_classifier = True
 
     def _build_model(self):
+        if self.class_weights is not None:
+            loss = self.loss_fn(weight=self.class_weights.to(device))
+        else:
+            loss = self.loss_fn()
+
         return ClassificationModel(
             nb_features=self.nb_features,
-            num_classes=self.num_classes,
+            output_vars=self.output_vars,
             width=self.width,
-            dropout_rates=self.dropout_rates,
-            loss_fn=self.loss_fn
+            layers=self.layers,
+            activation=self.activation,
+            loss_fn=loss,
+            dropout_rates=self.dropout_rates
         ).to(device)
