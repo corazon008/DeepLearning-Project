@@ -24,7 +24,7 @@ if __name__ == "__main__":
     df.info()
     df.describe()
 
-    print(f"Classification : -----------------------------")
+    print(f"\n\nClassification : -----------------------------")
 
     TARGET = 'disease_risk'
     print(f"On cherche à prédire s'il y a un risque de maladie (colonne {TARGET}).")
@@ -71,7 +71,7 @@ if __name__ == "__main__":
 
     pipeline.fit(X_train, y_train)
 
-    print("Nombre d'itérations :", pipeline.named_steps["mlp"].n_iter_)
+    print("\nNombre d'itérations :", pipeline.named_steps["mlp"].n_iter_)
 
     y_pred = pipeline.predict(X_test)
 
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     print("Accuracy :", accuracy_score(y_test, y_pred))
     print(classification_report(y_test, y_pred))
 
-    print(f"\nMatrice de confusion :")
+    print(f"Matrice de confusion")
 
     cm = confusion_matrix(y_test, y_pred)
 
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     plt.title("Confusion Matrix")
     plt.show()
 
-    print(f"Optimisation (GridSearchCV) :")
+    print(f"\nOptimisation (GridSearchCV) :")
 
     param_grid = {
         "mlp__hidden_layer_sizes": [(64,), (64, 32), (128, 64)],
@@ -119,10 +119,10 @@ if __name__ == "__main__":
 
     y_pred_best = best_model.predict(X_test)
 
-    print("Accuracy (optimisé) :", accuracy_score(y_test, y_pred_best))
+    print("\nAccuracy (optimisé) :", accuracy_score(y_test, y_pred_best))
     print(classification_report(y_test, y_pred_best))
 
-    print(f"Régression linéaire : -----------------------------")
+    print(f"\nRégression linéaire : -----------------------------")
     print(f"On cherche à prédire le taux de cholesterol et les calories consomées (les colonnes 'cholesterol' et 'calories_consumed').")
 
     TARGETS = ["calories_consumed", "cholesterol"]
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     ])
 
     pipeline.fit(X_train, Y_train)
-    print("Itérations :", pipeline.named_steps["mlp"].n_iter_)
+    print("\nItérations :", pipeline.named_steps["mlp"].n_iter_)
 
     Y_pred = pipeline.predict(X_test)
 
