@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 from typing import List, Optional
-from sklearn.utils.class_weight import compute_class_weight
 
 
 class MyDropout:
@@ -33,7 +32,16 @@ class ModelBase(nn.Module):
                 self.net.add_module(f"dropout_{i + 1}", nn.Dropout(d))
 
         self.net.add_module("output_layer", nn.Linear(width, output_vars))
-        self.loss_fn = loss_fn # need callable because of buid_model of classifier
+        # Accept either a loss class (callable) or an already-instantiated loss object.
+        if callable(loss_fn):
+            # instantiate
+            try:
+                self.loss_fn = loss_fn()
+            except Exception:
+                # fallback: if instantiation fails, keep the object as-is
+                self.loss_fn = loss_fn
+        else:
+            self.loss_fn = loss_fn
 
     def forward(self, x):
         return self.net(x)  # .squeeze(1)
