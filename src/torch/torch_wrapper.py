@@ -23,8 +23,8 @@ class Skwrapper(BaseEstimator, RegressorMixin):
                  epochs=20,
                  verbose=0,
                  early_stopping=True,
-                 patience=5,
-                 min_delta=1e-5):
+                 patience=10,
+                 min_delta=1e-6):
 
         self.width = width
         self.layers = layers
